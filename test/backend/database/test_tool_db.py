@@ -1244,6 +1244,57 @@ def test_add_tool_field(monkeypatch, mock_session):
     assert result["source"] == "test_source"
 
 
+def _patch_session(monkeypatch, session):
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+
+def test_add_tool_field_missing_tool_info_returns_none(monkeypatch, mock_session):
+    """A ToolInstance whose tool_id has no ToolInfo row must not raise."""
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.first = MagicMock(return_value=None)
+    query.filter.return_value = mock_filter
+    _patch_session(monkeypatch, session)
+
+    assert add_tool_field({"tool_id": 999, "params": {}}) is None
+
+
+def test_add_tool_field_null_params_defaults_to_empty_list(monkeypatch, mock_session):
+    """A ToolInfo row with params=NULL yields an empty params list."""
+    session, query = mock_session
+    mock_tool_info = MockToolInfo()
+    mock_tool_info.params = None
+    mock_filter = MagicMock()
+    mock_filter.first = MagicMock(return_value=mock_tool_info)
+    query.filter.return_value = mock_filter
+    _patch_session(monkeypatch, session)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__)
+
+    result = add_tool_field({"tool_id": 1, "params": {"param1": "value1"}})
+
+    assert result["params"] == []
+
+
+def test_search_tools_for_sub_agent_skips_orphaned_tool(monkeypatch, mock_session):
+    """An instance whose ToolInfo is missing is skipped, not appended."""
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.all = MagicMock(return_value=[MockToolInstance()])
+    query.filter.return_value = mock_filter
+    _patch_session(monkeypatch, session)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__)
+    monkeypatch.setattr(
+        "backend.database.tool_db.add_tool_field", lambda data: None)
+
+    assert search_tools_for_sub_agent(1, "tenant1") == []
+
+
 def test_search_tools_for_sub_agent(monkeypatch, mock_session):
     """Test searching tools for sub-agent"""
     session, query = mock_session
